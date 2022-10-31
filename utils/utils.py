@@ -427,7 +427,7 @@ def build_targets(p, targets, model):
     style = None
     multi_gpu = type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)
     for i, j in enumerate(model.yolo_layers):
-        anchors = model.module.module_list[j].anchor_vec if multi_gpu else model.module_list[j].anchor_vec
+        anchors,shape = model.module.module_list[j].anchor_vec if multi_gpu else model.module_list[j].anchor_vec, p[i].shape
         gain[2:] = torch.tensor(p[i].shape)[[3, 2, 3, 2]]  # xyxy gain
         na = anchors.shape[0]  # number of anchors
         at = torch.arange(na).view(na, 1).repeat(1, nt)  # anchor tensor, same as .repeat_interleave(nt)
@@ -464,7 +464,7 @@ def build_targets(p, targets, model):
         gi, gj = gij.T  # grid xy indices
 
         # Append
-        indices.append((b, a, gj.clamp_(0, gain[3] - 1), gi.clamp_(0, gain[2] - 1)))  # image, anchor, grid indices
+        indices.append((b, a, gj.clamp_(0, shape[2] - 1), gi.clamp_(0, shape[3] - 1)))  # image, anchor, grid
         tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
         anch.append(anchors[a])  # anchors
         tcls.append(c)  # class
@@ -797,16 +797,16 @@ def fitness(x):
 
 
 def output_to_target(output, width, height):
-    """
-    Convert a YOLO model output to target format
-    [batch_id, class_id, x, y, w, h, conf]
-    """
+    # Convert model output to target format [batch_id, class_id, x, y, w, h, conf]
     if isinstance(output, torch.Tensor):
         output = output.cpu().numpy()
 
     targets = []
     for i, o in enumerate(output):
         if o is not None:
+            # sometimes output can be a list of tensor, so here ensure the type again, this fixes the error.
+            if isinstance(o, torch.Tensor):
+                o = o.cpu().numpy()
             for pred in o:
                 box = pred[:4]
                 w = (box[2] - box[0]) / width
@@ -819,7 +819,6 @@ def output_to_target(output, width, height):
                 targets.append([i, cls, x, y, w, h, conf])
 
     return np.array(targets)
-
 
 # Plotting functions ---------------------------------------------------------------------------------------------------
 def plot_one_box(x, img, color=None, label=None, line_thickness=None):
